@@ -1,0 +1,607 @@
+# Databricks notebook source
+# MAGIC %md-sandbox
+# MAGIC
+# MAGIC <div style="text-align: center; line-height: 0; padding-top: 9px;">
+# MAGIC   <img src="https://databricks.com/wp-content/uploads/2018/03/db-academy-rgb-1200px.png" alt="Databricks Learning" style="width: 600px; height: 163px">
+# MAGIC </div>
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Aggregations, JOINs and Nested Queries
+# MAGIC Apache Spark&trade; and Databricks&reg; allow you to create on-the-fly data lakes.
+# MAGIC
+# MAGIC ## In this lesson you:
+# MAGIC * Use basic aggregations.
+# MAGIC * Correlate two data sets with a join
+# MAGIC * Use subselects
+# MAGIC
+# MAGIC ## Audience
+# MAGIC * Primary Audience: Data Analysts
+# MAGIC * Additional Audiences: Data Engineers and Data Scientists
+# MAGIC
+# MAGIC ## Prerequisites
+# MAGIC * Web browser: Chrome or Firefox
+# MAGIC * Lesson: <a href="$./02-Querying-Files">Querying Files with SQL</a>
+# MAGIC * Concept: <a href="https://www.w3schools.com/sql/" target="_blank">Basic SQL</a>
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Getting Started
+# MAGIC
+# MAGIC Run the following cell to configure our "classroom."
+
+# COMMAND ----------
+
+# MAGIC %run "./Includes/Classroom-Setup"
+
+# COMMAND ----------
+
+# MAGIC %run "./Includes/Test-Library"
+
+# COMMAND ----------
+
+# MAGIC %md-sandbox
+# MAGIC ## Basic aggregations
+# MAGIC
+# MAGIC Using <a href="https://spark.apache.org/docs/latest/api/python/pyspark.sql.html#module-pyspark.sql.functions" target="_blank">built-in Spark functions</a>, you can aggregate data in various ways. 
+# MAGIC
+# MAGIC Run the cell below to compute the average of all salaries in the `People10M` table.
+# MAGIC
+# MAGIC <img alt="Side Note" title="Side Note" style="vertical-align: text-bottom; position: relative; height:1.75em; top:0.05em; transform:rotate(15deg)" src="https://files.training.databricks.com/static/images/icon-note.webp"/> By default, you get a floating point value.
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC select * from People10M  where firstName='Caren' and birthDate<'1980-03-01'  order by birthDate
+
+# COMMAND ----------
+
+from pyspark.sql import functions as F
+
+# COMMAND ----------
+
+df_birthdate = spark.table("People10M").filter((F.col("firstName")=='Caren') & (F.col("birthDate") < '1980-03-01')).orderBy("birthDate").show()
+
+
+# COMMAND ----------
+
+# MAGIC %scala
+# MAGIC import org.apache.spark.sql.functions._
+# MAGIC val df_birthdate = spark.table("People10M").filter(col("firstName") === "Caren" && col("birthDate") < "1980-03-01").orderBy("birthDate")
+# MAGIC   
+# MAGIC df_birthdate.show()
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC select * from People10M  where firstName='Caren' and year(birthDate)<='1980' and month(birthDate)<'03'  order by birthDate
+
+# COMMAND ----------
+
+
+df_birthdate = spark.table("People10M").filter(
+    (F.col("firstName") == 'Caren') & 
+    ((F.year(F.col("birthDate")) < 1980) | 
+     ((F.year(F.col("birthDate")) == 1980) & (F.month(F.col("birthDate")) < 3)))
+).orderBy("birthDate").show()
+
+
+
+# COMMAND ----------
+
+df_birthdate = spark.sql("""
+SELECT * 
+FROM People10M
+WHERE firstName = 'Caren' AND birthDate < '1980-03-01'
+ORDER BY birthDate
+""")
+
+df_birthdate.show()
+
+
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT avg(salary) AS averageSalary 
+# MAGIC FROM People10M
+
+# COMMAND ----------
+
+from pyspark.sql import functions as F
+df_avgSalaire = spark.table("People10M").agg(F.avg("salary").alias("averageSalary")).show()
+
+# COMMAND ----------
+
+
+avgSalaire = spark.sql("""SELECT AVG(salary) AS averageSalary FROM People10M""")
+avgSalaire.show()
+
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Convert that value to an integer using the SQL `round()` function. See
+# MAGIC <a href="http://spark.apache.org/docs/latest/api/python/pyspark.sql.html#pyspark.sql.functions.round" class="text-info">the PySpark documentation for <tt>round()</tt></a>
+# MAGIC for more details.
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT round(avg(salary)) AS averageSalary 
+# MAGIC FROM People10M
+
+# COMMAND ----------
+
+from pyspark.sql import functions as F
+df_avgSalaire = spark.table("People10M").agg(F.round(F.avg("salary")).alias("averageSalary")).show()
+
+# COMMAND ----------
+
+df_avgSalaire=spark.sql("""SELECT round(avg(salary)) AS averageSalary 
+FROM People10M""").show()
+
+# COMMAND ----------
+
+# MAGIC %scala
+# MAGIC val df_avgSalaire = spark.table("People10M")
+# MAGIC   .agg(round(avg("salary")).alias("averageSalary")).show()
+# MAGIC
+
+# COMMAND ----------
+
+type
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC In addition to the average salary, what are the maximum and minimum salaries?
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT max(salary) AS max, min(salary) AS min, round(avg(salary)) AS average 
+# MAGIC FROM People10M
+
+# COMMAND ----------
+
+df_maxmin = spark.table("People10M").agg(F.max("salary").alias("max"),F.max("salary").alias("min"),F.round(F.max("salary")).alias("averge")).show()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Joining two tables
+# MAGIC
+# MAGIC Correlate the data in two data sets using a SQL join. 
+# MAGIC
+# MAGIC The `People10M` table has 10 million names in it. 
+# MAGIC
+# MAGIC > How many of the first names appear in Social Security data files? 
+# MAGIC
+# MAGIC To find out, use the `SSANames` table with first name popularity data from the United States Social Security Administration. 
+# MAGIC
+# MAGIC For every year from 1880 to 2014, `SSANames` lists the first names of people born in that year, their gender, and the total number of people given that name. 
+# MAGIC
+# MAGIC By joining the `People10M` table with `SSANames`, weed out the names that aren't represented in the Social Security data.
+# MAGIC
+# MAGIC (In a real application, you might use a join like this to filter out bad data.)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Start by taking a quick peek at what `SSANames` looks like.
+
+# COMMAND ----------
+
+lines=["hello word", "this is world", "this is anoher"] 
+sc.parallelize(lines).map(lambda line: line.split(' ')).collect()
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT * FROM SSANames
+
+# COMMAND ----------
+
+SSANames = spark.table("SSANames").show()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Next, get an idea of how many distinct names there are in each of our tables, with a quick count of distinct names.
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT count(DISTINCT firstName) 
+# MAGIC FROM People10M
+
+# COMMAND ----------
+
+firstName = spark.table("People10M").agg(F.countDistinct("firstName")).show()
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT count(DISTINCT firstName)
+# MAGIC FROM SSANames
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC By introducing two more temporary views, each one consisting of distinct names, the join will be easier to read/write.
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC CREATE temporary VIEW myview_2 AS 
+# MAGIC    SELECT distinct(firstName) SSAFirstName_1 FROM SSANames;
+# MAGIC    
+# MAGIC CREATE temporary VIEW myview_1 AS 
+# MAGIC    SELECT distinct(firstName) Peeps_1 FROM People10M; 
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC CREATE OR REPLACE TEMPORARY VIEW SSADistinctNames AS 
+# MAGIC   SELECT DISTINCT firstName AS ssaFirstName 
+# MAGIC   FROM SSANames;
+# MAGIC
+# MAGIC CREATE OR REPLACE TEMPORARY VIEW PeopleDistinctNames AS 
+# MAGIC   SELECT DISTINCT firstName 
+# MAGIC   FROM People10M
+
+# COMMAND ----------
+
+SSADistinctNames = spark.table("SSANames").select(F.col("firstName").alias("ssaFirstName")).distinct().createOrReplaceTempView("SSADistinctNames")
+
+# COMMAND ----------
+
+PeopleDistinctNames = spark.table("People10M").select(F.col("firstName")).distinct().createOrReplaceTempView("PeopleDistinctNames")
+
+# COMMAND ----------
+
+SSDistinctNames=spark.sql("""CREATE OR REPLACE TEMPORARY VIEW SSADistinctNames AS 
+  SELECT DISTINCT firstName AS ssaFirstName 
+  FROM SSANames;""")
+
+# COMMAND ----------
+
+PeopleDistinctNames=spark.sql("""CREATE OR REPLACE TEMPORARY VIEW PeopleDistinctNames AS 
+  SELECT DISTINCT firstName 
+  FROM People10M""")
+
+# COMMAND ----------
+
+# MAGIC %scala
+# MAGIC val SSADistinctNames = spark.table("SSANames")
+# MAGIC   .select(col("firstName").alias("ssaFirstName"))
+# MAGIC   .distinct().createOrReplaceTempView("SSADistinctNames")
+
+# COMMAND ----------
+
+# MAGIC %scala
+# MAGIC val PeopleDistinctNames = spark.table("People10M")
+# MAGIC   .select(col("firstName"))
+# MAGIC   .distinct().createOrReplaceTempView("PeopleDistinctNames")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Next, join the two tables together to get the answer.
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT firstName 
+# MAGIC   FROM SSADistinctNames
+# MAGIC inner join PeopleDistinctNames ON firstName = ssaFirstName
+
+# COMMAND ----------
+
+T1=spark.table("SSADistinctNames")
+T2=spark.table("PeopleDistinctNames")
+firstjointure = T1.join(T2, T1.ssaFirstName == T2.firstName).select("firstName")
+
+# COMMAND ----------
+
+# MAGIC %scala
+# MAGIC val T1 = spark.table("SSADistinctNames")
+# MAGIC val T2 = spark.table("PeopleDistinctNames")
+# MAGIC val firstjointure = T1.join(T2, T1("ssaFirstName") === T2("firstName"))
+# MAGIC   .select("firstName")
+
+# COMMAND ----------
+
+firstjointure =spark.sql("""SELECT firstName 
+  FROM SSADistinctNames inner join PeopleDistinctNames ON firstName = ssaFirstName""").show()
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT firstName firstName1
+# MAGIC FROM PeopleDistinctNames 
+# MAGIC INNER JOIN SSADistinctNames ON firstName = ssaFirstName
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC How many are there?
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC select count(*) from  peopleDistinctNames 
+# MAGIC INNER JOIN SSADistinctNames ON firstName = ssaFirstName
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT count(*) 
+# MAGIC FROM PeopleDistinctNames 
+# MAGIC INNER JOIN SSADistinctNames ON firstName = ssaFirstName
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Nested Queries
+# MAGIC
+# MAGIC Joins are not the only way to solve the problem. 
+# MAGIC
+# MAGIC A sub-select works as well.
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT count(firstName) 
+# MAGIC FROM PeopleDistinctNames
+# MAGIC WHERE firstName IN (
+# MAGIC   SELECT ssaFirstName FROM SSADistinctNames
+# MAGIC )
+
+# COMMAND ----------
+
+# MAGIC %md-sandbox
+# MAGIC ## Exercise 1
+# MAGIC
+# MAGIC In the tables above, some of the salaries in the `People10M` table are negative. 
+# MAGIC
+# MAGIC These salaries represent bad data. 
+# MAGIC
+# MAGIC Your job is to convert all the negative salaries to positive ones, and then sort the top 20 people by their salary.
+# MAGIC
+# MAGIC <img alt="Hint" title="Hint" style="vertical-align: text-bottom; position: relative; height:1.75em; top:0.3em" src="https://files.training.databricks.com/static/images/icon-light-bulb.svg"/>&nbsp;**Hint:** See the Apache Spark documentation, <a href="https://spark.apache.org/docs/latest/api/python/pyspark.sql.html#module-pyspark.sql.functions" target="_blank">built-in functions</a>.
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Step 1
+# MAGIC Create a temporary view called `PeopleWithFixedSalaries`, where all the negative salaries have been converted to positive numbers.
+
+# COMMAND ----------
+
+from pyspark.sql import functions as F  
+df_positive_salaries = spark.table("People10M").withColumn("salary", F.abs(F.col("salary"))).createOrReplaceTempView("PeopleWithFixedSalaries")
+
+# COMMAND ----------
+
+# MAGIC %scala
+# MAGIC val df_positive_salaries = spark.table("People10M").withColumn("salary", abs(col("salary"))).createOrReplaceTempView("PeopleWithFixedSalaries")
+
+# COMMAND ----------
+
+# MAGIC %python
+# MAGIC # TEST - Run this cell to test your solution.
+# MAGIC
+# MAGIC belowZero = spark.read.table("PeopleWithFixedSalaries").where("salary < 0").count()
+# MAGIC dbTest("SQL-L3-belowZero", 0, belowZero)
+# MAGIC
+# MAGIC print("Tests passed!")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Step 2
+# MAGIC
+# MAGIC Starting with the table `PeopleWithFixedSalaries`, create another view called `PeopleWithFixedSalariesSorted` where:
+# MAGIC 0. The data set has been reduced to the first 20 records
+# MAGIC 0. The records are sorted by the column `salary` in ascending order
+
+# COMMAND ----------
+
+from pyspark.sql import functions as F 
+df_positive_salaries = spark.table("People10M").withColumn("salary", F.abs(F.col("salary"))).sort(F.col("salary")).limit(20).createOrReplaceTempView("PeopleWithFixedSalariesSorted")
+
+# COMMAND ----------
+
+# MAGIC %python
+# MAGIC # TEST - Run this cell to test your solution.
+# MAGIC
+# MAGIC resultsDF = spark.sql("select salary from PeopleWithFixedSalariesSorted")
+# MAGIC dbTest("SQL-L3-count", 20, resultsDF.count())
+# MAGIC
+# MAGIC print("Tests passed!")
+
+# COMMAND ----------
+
+# MAGIC %python
+# MAGIC # TEST - Run this cell to test your solution.
+# MAGIC
+# MAGIC results = [r[0] for r in resultsDF.collect()]
+# MAGIC
+# MAGIC dbTest("SQL-L3-fixedSalaries-0", 2, results[0])
+# MAGIC dbTest("SQL-L3-fixedSalaries-1", 3, results[1])
+# MAGIC dbTest("SQL-L3-fixedSalaries-2", 4, results[2])
+# MAGIC
+# MAGIC dbTest("SQL-L3-fixedSalaries-10", 19, results[10])
+# MAGIC dbTest("SQL-L3-fixedSalaries-11", 19, results[11])
+# MAGIC dbTest("SQL-L3-fixedSalaries-12", 20, results[12])
+# MAGIC
+# MAGIC dbTest("SQL-L3-fixedSalaries-17", 28, results[17])
+# MAGIC dbTest("SQL-L3-fixedSalaries-18", 30, results[18])
+# MAGIC dbTest("SQL-L3-fixedSalaries-19", 31, results[19])
+# MAGIC
+# MAGIC print("Tests passed!")
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT * FROM PeopleWithFixedSalariesSorted LIMIT 10
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Exercise 2
+# MAGIC
+# MAGIC As a refinement, assume that all salaries under $20,000 represent bad rows and filter them out.
+# MAGIC
+# MAGIC Additionally, categorize each person's salary into $10K groups.
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Step 1
+# MAGIC Create a temporary view called `PeopleWithFixedSalaries20K` where:
+# MAGIC 0. Start with the table `PeopleWithFixedSalaries`
+# MAGIC 0. The data set excludes all records where salaries are below $20K
+# MAGIC 0. The data set includes a new column called `salary10k`, that should be the salary in groups of 10,000. For example:
+# MAGIC   * A salary of 23,000 should report a value of "2"
+# MAGIC   * A salary of 57,400 should report a value of "6"
+# MAGIC   * A salary of 1,231,375 should report a value of "123"
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC drop table if exists PeopleWithFixedSalaries20K;
+# MAGIC create temporary view PeopleWithFixedSalaries20K as
+# MAGIC select *, round(salary/10000) as salary10k from PeopleWithFixedSalaries where salary>=20000 
+
+# COMMAND ----------
+
+step0= spark.sql("""drop table if exists PeopleWithFixedSalaries20K""")
+step1= spark.sql("""create temporary view PeopleWithFixedSalaries20K as
+select *, round(salary/10000) as salary10k from PeopleWithFixedSalaries where salary>=20000""")
+
+# COMMAND ----------
+
+from pyspark.sql import functions as F
+spark.catalog.dropTempView("PeopleWithFixedSalaries20K") 
+df_FixedSalaries20K = spark.table("PeopleWithFixedSalaries").filter(F.col("salary")>=20000).withColumn("salary10k", F.round(F.col("salary")/10000)).createOrReplaceTempView("PeopleWithFixedSalaries20K")
+
+# COMMAND ----------
+
+# MAGIC %scala
+# MAGIC val df_FixedSalaries20K = spark.table("PeopleWithFixedSalaries").filter(col("salary") >= 20000).withColumn("salary10k", col("salary") / 10000).createOrReplaceTempView("PeopleWithFixedSalaries20K")
+
+# COMMAND ----------
+
+# MAGIC %python
+# MAGIC # TEST - Run this cell to test your solution.
+# MAGIC
+# MAGIC below2K = spark.sql("select * from PeopleWithFixedSalaries20K where salary < 20000").count()
+# MAGIC dbTest("SQL-L3-count-salaries", 0, below2K)
+# MAGIC
+# MAGIC print("Tests passed!")
+
+# COMMAND ----------
+
+# MAGIC %python
+# MAGIC # TEST - Run this cell to test your solution.
+# MAGIC
+# MAGIC resultsDF = spark.sql("select salary10k, count(*) as total from PeopleWithFixedSalaries20K  group by salary10k order by salary10k, total limit 5")
+# MAGIC results = [ (str(int(r[0]))+" w/"+str(r[1])) for r in resultsDF.collect()]
+# MAGIC
+# MAGIC dbTest("SQL-L3-countSalaries-0", "2 w/43792", results[0])
+# MAGIC dbTest("SQL-L3-countSalaries-1", "3 w/212630", results[1])
+# MAGIC dbTest("SQL-L3-countSalaries-2", "4 w/536536", results[2])
+# MAGIC dbTest("SQL-L3-countSalaries-3", "5 w/1055261", results[3])
+# MAGIC dbTest("SQL-L3-countSalaries-4", "6 w/1623248", results[4])
+# MAGIC
+# MAGIC print("Tests passed!")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Exercise 3
+# MAGIC
+# MAGIC Using the `People10M` table, count the number of females named Caren who were born before March 1980. 
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Step 1
+# MAGIC Starting with the table `People10M`, create a temporary view called `Carens` where:
+# MAGIC 0. The result set has a single record
+# MAGIC 0. The data set has a single column named `total`
+# MAGIC 0. The result counts only 
+# MAGIC   * Females (`gender`)
+# MAGIC   * First Name is "Caren" (`firstName`)
+# MAGIC   * Born before March 1980 (`birthDate`)
+
+# COMMAND ----------
+
+# MAGIC %sql 
+# MAGIC select count(*) from People10M where firstName='Caren' and gender= 'F' and birthDate<='1980-03-01' 
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC create or replace temporary view carens as 
+# MAGIC select count(*) as total from People10M where  year(birthDate)<'1980' and month(birthDate)<'03' and firstName='Caren' and gender= 'F';
+# MAGIC select * from carens
+
+# COMMAND ----------
+
+# MAGIC %scala
+# MAGIC val df_carens = spark.table("People10M").filter(year(col("birthDate")) < 1980 && month(col("birthDate")) < 3 && col("firstName") === "Caren" && col("gender") === "F").agg(count("*").alias("total")).createOrReplaceTempView("carens")
+
+# COMMAND ----------
+
+df_carner=spark.sql("""create or replace temporary view carens as 
+select count(*) as total from People10M where  year(birthDate)<'1980' and month(birthDate)<'03' and firstName='Caren' and gender= 'F'""")
+
+# COMMAND ----------
+
+df_carens = spark.table("People10M").filter((F.col("birthDate") < "1980-03-01 00:00:00") & (F.col("firstName") == "Caren") & (F.col("gender") == "F")).agg(F.count("*").alias("total")).createOrReplaceTempView("carens")
+
+# COMMAND ----------
+
+# MAGIC %python
+# MAGIC # TEST - Run this cell to test your solution.
+# MAGIC
+# MAGIC rows = spark.sql("SELECT total FROM Carens").collect()
+# MAGIC dbTest("SQL-L3-carens-len", 1, len(rows))
+# MAGIC dbTest("SQL-L3-carens-total", 750, rows[0].total)
+# MAGIC
+# MAGIC print("Tests passed!")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Next Steps
+# MAGIC
+# MAGIC * Do the [Challenge Exercise]($./Optional/03-Joins-Aggregations).
+# MAGIC * Start the next lesson, [Accessing Data]($./04-Accessing-Data).
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Additional Topics & Resources
+# MAGIC
+# MAGIC * <a href="https://docs.databricks.com/spark/latest/spark-sql/index.html" target="_blank">Spark SQL Reference</a>
+# MAGIC * <a href="http://spark.apache.org/docs/latest/sql-programming-guide.html" target="_blank">Spark SQL, DataFrames and Datasets Guide</a>
+# MAGIC * <a href="https://databricks.com/blog/2017/08/31/cost-based-optimizer-in-apache-spark-2-2.html" target="_blank">Cost-based Optimizer in Apache Spark 2.2</a>
+
+# COMMAND ----------
+
+# MAGIC %md-sandbox
+# MAGIC &copy; 2019 Databricks, Inc. All rights reserved.<br/>
+# MAGIC Apache, Apache Spark, Spark and the Spark logo are trademarks of the <a href="http://www.apache.org/">Apache Software Foundation</a>.<br/>
+# MAGIC <br/>
+# MAGIC <a href="https://databricks.com/privacy-policy">Privacy Policy</a> | <a href="https://databricks.com/terms-of-use">Terms of Use</a> | <a href="http://help.databricks.com/">Support</a>

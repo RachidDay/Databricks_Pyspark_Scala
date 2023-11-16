@@ -1,0 +1,4 @@
+2023.11.14 23:22:09 INFO  Started: Metals version 1.1.0 in folders 'C:\Users\DAY\Desktop\Formation' for client Visual Studio Code 1.84.0.
+2023.11.14 23:22:10 INFO  time: initialize in 0.31s
+2023.11.14 23:22:15 WARN  Build server is not auto-connectable.
+2023.11.14 23:22:15 WARN  no build tool detected in workspace 'C:\Users\DAY\Desktop\Formation'. The most common cause for this problem is that the editor was opened in the wrong working directory, for example if you use sbt then the workspace directory should contain build.sbt. 
